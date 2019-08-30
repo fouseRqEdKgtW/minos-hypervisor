@@ -191,7 +191,7 @@ static struct task *__create_task(char *name, task_func_t func,
 	 * to get the task_info of the task, so need to keep
 	 * the stack size as same in each task
 	 */
-#ifdef CONFIG_VIRT
+#if 1
 	stk_size = TASK_STACK_SIZE;
 	stack = __get_free_pages(PAGE_NR(stk_size), PAGE_NR(stk_size));
 #else
@@ -344,7 +344,7 @@ int create_idle_task(void)
 
 	/* reinit the task's stack information */
 	task->stack_size = TASK_STACK_SIZE;
-#ifndef CONFIG_VIRT
+#if 1
 	task->stack_origin = (void *)current_sp() -
 		sizeof(struct task_info);
 #else
