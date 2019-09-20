@@ -43,6 +43,10 @@ int serial_init(void)
 	return bcm283x_mu_init((void *)0x3f215040, 250000000, 115200);
 #endif
 
+#ifdef CONFIG_PLATFORM_VIM3
+	return meson_uart_init((void *)0x0, 0, 115200);
+#endif
+
 	return 0;
 }
 
@@ -59,6 +63,10 @@ void serial_putc(char ch)
 #ifdef CONFIG_PLATFORM_RASPBERRY3
 	bcm283x_mu_putc(ch);
 #endif
+
+#ifdef CONFIG_PLATFORM_VIM3
+	meson_uart_putc(ch);
+#endif
 }
 
 char serial_getc(void)
@@ -73,6 +81,10 @@ char serial_getc(void)
 
 #ifdef CONFIG_PLATFORM_RASPBERRY3
 	return bcm283x_mu_getc();
+#endif
+
+#ifdef CONFIG_PLATFORM_VIM3
+	return meson_uart_getc();
 #endif
 	return 0;
 }
