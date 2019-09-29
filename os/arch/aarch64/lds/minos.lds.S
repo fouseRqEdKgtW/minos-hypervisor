@@ -87,6 +87,14 @@ SECTIONS
 
 	. = ALIGN(8);
 
+	__controller_start = .;
+	.__controller : {
+		*(.__controller)
+	}
+	__controller_end = .;
+
+	. = ALIGN(8);
+
 	__vdev_start = .;
 	.__vdev : {
 		*(.__vdev)

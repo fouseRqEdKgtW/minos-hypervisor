@@ -143,7 +143,12 @@ static inline int translate_device_address(struct device_node *node,
 	return translate_device_address_index(node, base, size, 0);
 }
 
+int of_irq_count(struct device_node *node);
+
 int get_device_irq_index(struct device_node *node, uint32_t *irq,
 		unsigned long *flags, int index);
+
+int of_map_iomem(struct device_node *node,
+		vir_addr_t *va, unsigned long flags);
 
 #endif

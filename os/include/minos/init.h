@@ -20,6 +20,8 @@ typedef int (*init_call)(void);
 #define __init_data 	__section(".__init_data_section")
 #define __init_text 	__section(".__init_text")
 
+#define __init		__init_text
+
 #define __init_0	__section(".__init_func_0")
 #define __init_1	__section(".__init_func_1")
 #define __init_2	__section(".__init_func_2")

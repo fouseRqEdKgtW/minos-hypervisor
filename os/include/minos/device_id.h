@@ -78,6 +78,14 @@ struct module_id {
 		.data = vdev, \
 	}
 
+#define CONTROLLER_DECLARE(cname, cn, init_fn) \
+	static const struct module_id __used \
+	module_match_##mname __section(.__irqchip) = { \
+		.name = cn, \
+		.comp = NULL, \
+		.data = init_fn, \
+	}
+
 extern char *gicv2_match_table[];
 extern char *gicv3_match_table[];
 extern char *bcmirq_match_table[];
