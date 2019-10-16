@@ -19,7 +19,7 @@ int unmap_vm_memory(struct vm *vm, unsigned long vir_addr,
 int alloc_vm_memory(struct vm *vm);
 void release_vm_memory(struct vm *vm);
 
-int create_guest_mapping(struct vm *vm, unsigned long vir,
+int create_guest_mapping(struct mm_struct *mm, unsigned long vir,
 		unsigned long phy, size_t size, unsigned long flags);
 
 int vm_mmap(struct vm *vm, unsigned long offset, unsigned long size);

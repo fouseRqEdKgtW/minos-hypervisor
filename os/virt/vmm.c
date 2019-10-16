@@ -66,7 +66,7 @@ void *vm_alloc_pages(struct vm *vm, int pages)
 	return page_to_addr(page);
 }
 
-int create_guest_mapping(struct vm *vm, vir_addr_t vir,
+int create_guest_mapping(struct mm_struct *mm, vir_addr_t vir,
 		phy_addr_t phy, size_t size, unsigned long flags)
 {
 	unsigned long tmp;
@@ -79,7 +79,7 @@ int create_guest_mapping(struct vm *vm, vir_addr_t vir,
 	pr_debug("map 0x%x->0x%x size-0x%x vm-%d\n", vir,
 			phy, size, vm->vmid);
 
-	return create_mem_mapping(&vm->mm, vir, phy, size, flags);
+	return create_mem_mapping(mm, vir, phy, size, flags);
 }
 
 static int __used destroy_guest_mapping(struct vm *vm,
@@ -145,7 +145,7 @@ unsigned long create_hvm_iomem_map(unsigned long phy, uint32_t size)
 	hvm_iomem_mmap_base += size;
 	spin_unlock(&mmap_lock);
 
-	if (create_guest_mapping(vm0, base, phy, size, VM_RW))
+	if (create_guest_mapping(&vm0->mm, base, phy, size, VM_RW))
 		base = 0;
 out:
 	return base;
@@ -350,7 +350,7 @@ int alloc_vm_memory(struct vm *vm)
 	 * this is map the ipa to pa in stage 2
 	 */
 	list_for_each_entry(block, &mm->block_list, list) {
-		i = create_guest_mapping(vm, base, block->phy_base,
+		i = create_guest_mapping(&vm->mm, base, block->phy_base,
 				MEM_BLOCK_SIZE, VM_NORMAL);
 		if (i)
 			goto free_vm_memory;
@@ -387,7 +387,7 @@ phy_addr_t get_vm_memblock_address(struct vm *vm, unsigned long a)
 }
 
 static struct vmm_area *__alloc_vmm_area_entry(unsigned long base,
-		size_t size, unsigned long flags)
+		unsigned long pbase, size_t size, unsigned long flags)
 {
 	struct vmm_area *va;
 
@@ -396,6 +396,7 @@ static struct vmm_area *__alloc_vmm_area_entry(unsigned long base,
 		return NULL;
 
 	va->start = base;
+	va->pstart = pbase;
 	va->end = base + size - 1;
 	va->size = size;
 	va->flags = flags;
@@ -410,32 +411,6 @@ static int add_used_vmm_area(struct mm_struct *mm, struct vmm_area *va)
 
 	list_add_tail(&mm->vmm_area_free, &va->list);
 	return 0;
-}
-
-static int __used create_used_vmm_area(struct mm_struct *mm, unsigned long base,
-		unsigned long size, unsigned long flags)
-{
-	int ret;
-	struct vmm_area *va;
-
-	if (!IS_PAGE_ALIGN(base) || !IS_PAGE_ALIGN(size)) {
-		pr_err("vm_area is not page align 0x%p 0x%x\n",
-				base, size);
-		return -EINVAL;
-	}
-
-	va = __alloc_vmm_area_entry(base, size, flags);
-	if (!va) {
-		pr_err("failed to alloc free vmm_area 0x%p 0x%x\n",
-				base, size);
-		return -ENOMEM;
-	}
-
-	spin_lock(&mm->lock);
-	ret = add_used_vmm_area(mm, va);
-	spin_unlock(&mm->lock);
-
-	return ret;
 }
 
 static int add_free_vmm_area(struct mm_struct *mm, struct vmm_area *va)
@@ -482,13 +457,14 @@ static int create_free_vmm_area(struct mm_struct *mm, unsigned long base,
 	int ret;
 	struct vmm_area *va;
 
-	if (!IS_PAGE_ALIGN(base) || !IS_PAGE_ALIGN(size)) {
+	if (!IS_PAGE_ALIGN(base) || !IS_PAGE_ALIGN(size) ||
+			!IS_PAGE_ALIGN(pbase)) {
 		pr_err("vm_area is not page align 0x%p 0x%x\n",
 				base, size);
 		return -EINVAL;
 	}
 
-	va = __alloc_vmm_area_entry(base, size, flags);
+	va = __alloc_vmm_area_entry(base, pbase, size, flags);
 	if (!va) {
 		pr_err("failed to alloc free vmm_area\n");
 		return -ENOMEM;
@@ -499,6 +475,21 @@ static int create_free_vmm_area(struct mm_struct *mm, unsigned long base,
 	spin_unlock(&mm->lock);
 
 	return ret;
+}
+
+int map_vmm_area(struct mm_struct *mm,
+		struct vmm_area *va, unsigned long pbase)
+{
+	unsigned long flags = 0;
+
+	if (pbase && IS_PAGE_ALIGN(pbase))
+		va->pstart = pbase;
+
+	if (va->pstart == 0)
+		return -EINVAL;
+
+	return create_guest_mapping(mm, va->start,
+			va->pstart, va->size, va->flags);
 }
 
 unsigned long alloc_free_vmm_area(struct mm_struct *mm,
@@ -543,7 +534,7 @@ unsigned long alloc_free_vmm_area(struct mm_struct *mm,
 }
 
 int split_vmm_area(struct mm_struct *mm, unsigned long base,
-		unsigned long size, unsigned long flags)
+		unsigned long pbase, unsigned long size, unsigned long flags)
 {
 	unsigned long start, end;
 	unsigned long new_end = base + size;
@@ -552,7 +543,8 @@ int split_vmm_area(struct mm_struct *mm, unsigned long base,
 	struct vmm_area *old = NULL;
 	struct vmm_area *old1 = NULL;
 
-	if (!IS_PAGE_ALIGN(base) || !IS_PAGE_ALIGN(size) || (size == 0)) {
+	if (!IS_PAGE_ALIGN(base) || !IS_PAGE_ALIGN(size) ||
+			(size == 0) || !IS_PAGE_ALIGN(pbase)) {
 		pr_err("vm_area is not page align 0x%p 0x%x\n",
 				base, size);
 		return -EINVAL;
@@ -592,7 +584,7 @@ int split_vmm_area(struct mm_struct *mm, unsigned long base,
 		}
 
 		list_del(&va->list);
-		new = __alloc_vmm_area_entry(base, size, flags);
+		new = __alloc_vmm_area_entry(base, pbase, size, flags);
 		if (!new)
 			panic("no more memory for vmm_area\n");
 		
@@ -649,6 +641,7 @@ void vm_mm_struct_init(struct vm *vm)
 	mm->head = NULL;
 	mm->pgd_base = 0;
 	mm->nr_mem_regions = 0;
+	mm->vm = vm;
 	spin_lock_init(&mm->lock);
 
 	mm->pgd_base = alloc_pgd();
@@ -661,20 +654,6 @@ void vm_mm_struct_init(struct vm *vm)
 		vmm_area_init(mm, 1);
 	else
 		vmm_area_init(mm, 0);
-
-	/*
-	 * for guest vm
-	 *
-	 * 0x0 - 0x3fffffff for vdev which controlled by
-	 * hypervisor, like gic and timer
-	 *
-	 * 0x40000000 - 0x7fffffff for vdev which controlled
-	 * by vm0, like virtio device, rtc device
-	 */
-	if (!vm_is_native(vm)) {
-		mm->gvm_iomem_base = GVM_IO_MEM_START + SIZE_1G;
-		mm->gvm_iomem_size = GVM_IO_MEM_SIZE - SIZE_1G;
-	}
 }
 
 void vm_init_shmem(struct vm *vm, uint64_t base, uint64_t size)
@@ -702,7 +681,7 @@ void *vm_map_shmem(struct vm *vm, void *phy, uint32_t size,
 	if (mm->shmem_size < size)
 		return NULL;
 
-	ret = create_guest_mapping(vm, (vir_addr_t)mm->shmem_base,
+	ret = create_guest_mapping(&vm->mm, (vir_addr_t)mm->shmem_base,
 			(phy_addr_t)phy, size, flags);
 	if (ret)
 		return NULL;
@@ -717,14 +696,15 @@ void *vm_map_shmem(struct vm *vm, void *phy, uint32_t size,
 int vm_mm_init(struct vm *vm)
 {
 	int i, ret;
-	struct memory_region *region;
+	struct vmm_area *va;
 	struct mm_struct *mm = &vm->mm;
 
-	/* just mapping the physical memory for VM */
-	for (i = 0; i < mm->nr_mem_regions; i++) {
-		region = &mm->memory_regions[i];
-		ret = create_guest_mapping(vm, region->vir_base,
-				region->phy_base, region->size, 0);
+	/* just mapping the physical memory for native VM */
+	list_for_each_entry(va, &mm->vm_area_uesed, list) {
+		if (!(va->flags & VM_NORMAL))
+			continue;
+		
+		ret = map_vmm_area(mm, va, 0);
 		if (ret) {
 			pr_err("build mem ma failed for vm-%d 0x%p 0x%p\n",
 				vm->vmid, region->phy_base, region->size);

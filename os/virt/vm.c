@@ -457,9 +457,7 @@ static void *create_native_vm_of(struct device_node *node, void *arg)
 {
 	int ret, i;
 	struct vm *vm;
-	struct mm_struct *mm;
 	struct vmtag vmtag;
-	struct memory_region *region;
 	uint64_t meminfo[2 * VM_MAX_MEM_REGIONS];
 
 	if (node->class != DT_CLASS_VM)
@@ -491,7 +489,6 @@ static void *create_native_vm_of(struct device_node *node, void *arg)
 	}
 
 	/* parse the memory information of the vm from dtb */
-	mm = &vm->mm;
 	ret = of_get_u64_array(node, "memory", meminfo, 2 * VM_MAX_MEM_REGIONS);
 	if ((ret <= 0) || ((ret % 2) != 0)) {
 		pr_err("get wrong memory information for vm-%d", vmtag.vmid);
@@ -501,23 +498,10 @@ static void *create_native_vm_of(struct device_node *node, void *arg)
 	}
 
 	ret = ret / 2;
-	if (ret > 10) {
-		pr_warn("VM have max %d@%d memory regions",
-				ret, VM_MAX_MEM_REGIONS);
-		ret = 10;
-	}
 
-	for (i = 0; i < ret; i++) {
-
-	}
-
-	mm->nr_mem_regions = ret;
 	for (i = 0; i < ret; i ++) {
-		region = &mm->memory_regions[i];
-		region->flags = 0;
-		region->phy_base = meminfo[i * 2];
-		region->vir_base = meminfo[i * 2];
-		region->free_size = region->size = meminfo[i * 2 + 1];
+		split_vmm_area(&vm->mm, meminfo[i * 2], meminfo[i * 2],
+				meminfo[i * 2 + 1], VM_NORMAL);
 	}
 
 	return vm;

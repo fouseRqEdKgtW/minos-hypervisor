@@ -266,7 +266,7 @@ int virtio_mmio_init(struct vm *vm, size_t size,
 		return -ENOMEM;
 	}
 
-	if (create_guest_mapping(vm, __gbase, (unsigned long)iomem,
+	if (create_guest_mapping(&vm->mm, __gbase, (unsigned long)iomem,
 				size, VM_IO | VM_RO)) {
 		free_pages(iomem);
 		return -EFAULT;

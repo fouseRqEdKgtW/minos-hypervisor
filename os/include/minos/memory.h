@@ -60,12 +60,6 @@ struct page {
 	};
 };
 
-#define VMM_AREA_FLAGS_KERNEL	(1 << 0)
-#define VMM_AREA_FLAGS_DMA	(1 << 1)
-#define VMM_AREA_FLAGS_IO	(1 << 2)
-#define VMM_AREA_FLAGS_SHMEM	(1 << 3)
-#define VMM_AREA_FLAGS_VIRTIO	(1 << 4)
-
 /*
  * pstart - if this area is mapped as continous the pstart
  * is the phsical address of this vmm_area

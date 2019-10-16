@@ -11,6 +11,7 @@
 #define VM_NONE			(0x00000000)
 #define VM_IO			(0x00000001)
 #define VM_NORMAL		(0x00000002)
+#define VM_SHMEM		(0x00000004)
 #define VM_TYPE_MASK		(0x000000ff)
 
 #define VM_DES_FAULT		(0x00000000)

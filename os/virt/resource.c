@@ -221,7 +221,7 @@ static int create_pdev_iomem_of(struct vm *vm, struct device_node *node)
 		/* map the physical memory for vm */
 		pr_info("[VM%d IOMEM] 0x%x->0x%x 0x%x %s\n", vm->vmid,
 				addr, addr, size, node->name);
-		create_guest_mapping(vm, addr, addr, size, VM_IO);
+		create_guest_mapping(&vm->mm, addr, addr, size, VM_IO);
 	}
 
 	return 0;
@@ -254,6 +254,20 @@ static int create_vm_res_of(struct vm *vm, struct device_node *node)
 	return 0;
 }
 
+static void *create_vm_simple_bus(struct vm *vm, struct device_node *node)
+{
+	/* get all the ranges and handle the vmm_area */
+	int scells, acells, count;
+	uint32_t array[64];
+
+	count = of_get_u32_array(node, "ranges", array, 64);
+	if (count <= 0)
+		return NULL;
+
+	scells = of_n_addr_cells(node);
+	acells = of_n_addr_cells(node);
+}
+
 static void *__create_vm_resource_of(struct device_node *node, void *arg)
 {
 	struct vm *vm = (struct vm *)arg;
@@ -268,6 +282,9 @@ static void *__create_vm_resource_of(struct device_node *node, void *arg)
 			break;
 		case DT_CLASS_VM:
 			create_vm_res_of(vm, node);
+			break;
+		case DT_CLASS_SIMPLE_BUS:
+			create_vm_simple_bus(vm, node);
 			break;
 		default:
 			break;
