@@ -386,6 +386,261 @@ phy_addr_t get_vm_memblock_address(struct vm *vm, unsigned long a)
 	return 0;
 }
 
+static struct vmm_area *__alloc_vmm_area_entry(unsigned long base,
+		size_t size, unsigned long flags)
+{
+	struct vmm_area *va;
+
+	va = zalloc(sizeof(*va));
+	if (!va)
+		return NULL;
+
+	va->start = base;
+	va->end = base + size - 1;
+	va->size = size;
+	va->flags = flags;
+
+	return va;
+}
+
+static int add_used_vmm_area(struct mm_struct *mm, struct vmm_area *va)
+{
+	if (!va)
+		return -EINVAL;
+
+	list_add_tail(&mm->vmm_area_free, &va->list);
+	return 0;
+}
+
+static int __used create_used_vmm_area(struct mm_struct *mm, unsigned long base,
+		unsigned long size, unsigned long flags)
+{
+	int ret;
+	struct vmm_area *va;
+
+	if (!IS_PAGE_ALIGN(base) || !IS_PAGE_ALIGN(size)) {
+		pr_err("vm_area is not page align 0x%p 0x%x\n",
+				base, size);
+		return -EINVAL;
+	}
+
+	va = __alloc_vmm_area_entry(base, size, flags);
+	if (!va) {
+		pr_err("failed to alloc free vmm_area 0x%p 0x%x\n",
+				base, size);
+		return -ENOMEM;
+	}
+
+	spin_lock(&mm->lock);
+	ret = add_used_vmm_area(mm, va);
+	spin_unlock(&mm->lock);
+
+	return ret;
+}
+
+static int add_free_vmm_area(struct mm_struct *mm, struct vmm_area *va)
+{
+	int first;
+	size_t size;
+	struct vmm_area *tmp, *next;
+
+	if (!va)
+		return -EINVAL;
+
+	/* indicate it not inserted to the free list */
+	va->list.next = NULL;
+	size = va->size;
+	first = 1;
+
+	/* free list will sort by the size */
+	list_for_each_entry_safe(tmp, next, &mm->vmm_area_free, list) {
+		if (first) {
+			if (size < tmp->size) {
+				list_add(&mm->vmm_area_free, &va->list);
+				break;
+			}
+
+			first = 0;
+		}
+
+		if ((size == tmp->size) ||
+			((size < tmp->size) && (size > next->size))) {
+			list_add_tail(&tmp->list, &va->list);
+			break;
+		}
+	}
+
+	if (va->list.next == NULL)
+		list_add_tail(&mm->vmm_area_free, &va->list);
+
+	return 0;
+}
+
+static int create_free_vmm_area(struct mm_struct *mm, unsigned long base,
+		unsigned long size, unsigned long flags)
+{
+	int ret;
+	struct vmm_area *va;
+
+	if (!IS_PAGE_ALIGN(base) || !IS_PAGE_ALIGN(size)) {
+		pr_err("vm_area is not page align 0x%p 0x%x\n",
+				base, size);
+		return -EINVAL;
+	}
+
+	va = __alloc_vmm_area_entry(base, size, flags);
+	if (!va) {
+		pr_err("failed to alloc free vmm_area\n");
+		return -ENOMEM;
+	}
+
+	spin_lock(&mm->lock);
+	ret = add_free_vmm_area(mm, va);
+	spin_unlock(&mm->lock);
+
+	return ret;
+}
+
+unsigned long alloc_free_vmm_area(struct mm_struct *mm,
+		size_t size, unsigned long flags)
+{
+	struct vmm_area *va;
+	struct vmm_area *old = NULL;
+	struct vmm_area *new = NULL;
+
+	size = BALIGN(size, PAGE_SIZE);
+
+	spin_lock(&mm->lock);
+	list_for_each_entry(va, &mm->vmm_area_free, list) {
+		if (va->size < size)
+			continue;
+
+		if (va->size > size) {
+			new = __alloc_vmm_area_entry(va->start, size, flags);
+			if (!new)
+				return 0;
+
+			old = va;
+			old->start = va->start + size;
+			old->size = va->size - size;
+			old->end = old->start + old->size - 1;
+		} else if (va->size == size) {
+			new = va;
+			new->flags = flags;
+		}
+
+		list_del(&va->list);
+		if (old)
+			add_free_vmm_area(mm, va);
+		if (new)
+			add_used_vmm_area(mm, va);
+
+		break;
+	}
+	spin_unlock(&mm->lock);
+
+	return new->start;
+}
+
+int split_vmm_area(struct mm_struct *mm, unsigned long base,
+		unsigned long size, unsigned long flags)
+{
+	unsigned long start, end;
+	unsigned long new_end = base + size;
+	struct vmm_area *va;
+	struct vmm_area *new = NULL;
+	struct vmm_area *old = NULL;
+	struct vmm_area *old1 = NULL;
+
+	if (!IS_PAGE_ALIGN(base) || !IS_PAGE_ALIGN(size) || (size == 0)) {
+		pr_err("vm_area is not page align 0x%p 0x%x\n",
+				base, size);
+		return -EINVAL;
+	}
+
+	spin_lock(&mm->lock);
+	list_for_each_entry(va, &mm->vmm_area_free, list) {
+		start = va->start;
+		end = va->end + 1;
+
+		if ((base > end) || (base < start) || (new_end > end))
+			continue;
+
+		if ((base == start) && (new_end == end)) {
+			new = va;
+			new->flags = flags;
+		} else if ((base == start) && new_end < end) {
+			old = va;
+			va->start = new_end;
+			va->size -= size;
+		} else if ((base > start) && (new_end < end)) {
+			/* allocate a new vmm_area for right free */
+			old1 = __alloc_vmm_area_entry(base, size, flags);
+			if (!old1)
+				panic("no more memory for vmm_area\n");
+
+			old1->start = new_end;
+			old1->size = end - new_end;
+			old1->end = old1->start + old1->size - 1;
+			old1->flags = va->flags;
+
+			old = va;
+			va->size = base - start;
+		} else if ((base > start) && end == new_end) {
+			old = va;
+			va->size = va->size - size;
+		}
+
+		list_del(&va->list);
+		new = __alloc_vmm_area_entry(base, size, flags);
+		if (!new)
+			panic("no more memory for vmm_area\n");
+		
+		break;
+	}
+
+	if ((old == NULL) && (new == NULL))
+		pr_err("invalid vmm_area config 0x%p 0x%x\n", base, size);
+
+	if (old)
+		add_free_vmm_area(mm, old);
+	if (old1)
+		add_free_vmm_area(mm, old1);
+	if (new)
+		add_used_vmm_area(mm, old1);
+
+	spin_unlock(&mm->lock);
+
+	return 0;
+}
+
+static void vmm_area_init(struct mm_struct *mm, int bit64)
+{
+	unsigned long base, size;
+
+	init_list(&mm->vmm_area_free);
+	init_list(&mm->vmm_area_used);
+
+	/*
+	 * the virtual memory space for a virtual machine:
+	 * 64bit - 48bit virtual address
+	 * 32bit - 32bit virutal address (Without LPAE)
+	 * 32bit - TBD (with LPAE)
+	 */
+	if (bit64) {
+		base = 0x0;
+		size = 0x0001000000000000;
+	} else {
+#ifdef CONFIG_VM_LPAE
+#else
+		base = 0x0;
+		size = 0x100000000;
+#endif
+	}
+
+	create_free_vmm_area(mm, base, size, 0);
+}
+
 void vm_mm_struct_init(struct vm *vm)
 {
 	struct mm_struct *mm = &vm->mm;
@@ -401,6 +656,11 @@ void vm_mm_struct_init(struct vm *vm)
 		pr_err("No memory for vm page table\n");
 		return;
 	}
+
+	if (vm_is_64bit(vm))
+		vmm_area_init(mm, 1);
+	else
+		vmm_area_init(mm, 0);
 
 	/*
 	 * for guest vm

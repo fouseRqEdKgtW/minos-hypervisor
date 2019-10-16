@@ -60,6 +60,25 @@ struct page {
 	};
 };
 
+#define VMM_AREA_FLAGS_KERNEL	(1 << 0)
+#define VMM_AREA_FLAGS_DMA	(1 << 1)
+#define VMM_AREA_FLAGS_IO	(1 << 2)
+#define VMM_AREA_FLAGS_SHMEM	(1 << 3)
+#define VMM_AREA_FLAGS_VIRTIO	(1 << 4)
+
+/*
+ * pstart - if this area is mapped as continous the pstart
+ * is the phsical address of this vmm_area
+ */
+struct vmm_area {
+	unsigned long start;
+	unsigned long end;
+	unsigned long pstart;
+	size_t size;
+	unsigned long flags;
+	struct list_head list;
+};
+
 struct mm_struct {
 	/* the base address of the page table for the vm */
 	unsigned long pgd_base;
@@ -96,14 +115,18 @@ struct mm_struct {
 	struct list_head block_list;
 
 	/*
-	 * list all the memory region for this VM, usually
-	 * native VM may have at least one memory region, but
-	 * guest VM will only have one region
+	 * vmm_area_free : list to all the free vmm_area
+	 * vmm_area_used : list to all the used vmm_area
+	 * lock		 : spin lock for vmm_area allocate
 	 */
+	spinlock_t lock;
+	struct list_head vmm_area_free;
+	struct list_head vmm_area_used;
+
 	int nr_mem_regions;
 	struct memory_region memory_regions[VM_MAX_MEM_REGIONS];
 
-	spinlock_t lock;
+	void *vm;
 };
 
 int add_memory_region(uint64_t base, uint64_t size, uint32_t flags);

@@ -507,6 +507,10 @@ static void *create_native_vm_of(struct device_node *node, void *arg)
 		ret = 10;
 	}
 
+	for (i = 0; i < ret; i++) {
+
+	}
+
 	mm->nr_mem_regions = ret;
 	for (i = 0; i < ret; i ++) {
 		region = &mm->memory_regions[i];
