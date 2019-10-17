@@ -201,19 +201,19 @@ int vm_power_off(int vmid, void *arg)
 	return __vm_power_off(vm, arg);
 }
 
-static int guest_vm_memory_init(struct vm *vm, uint64_t base, uint64_t size)
+static int guest_vmm_area_init(struct vm *vm, uint64_t base, uint64_t size)
 {
-	struct mm_struct *mm = &vm->mm;
-	struct memory_region *region = &mm->memory_regions[0];
+	if (split_vmm_area(&vm->mm, base, 0, size, VM_NORMAL | VM_BK)) {
+		pr_err("invalid memory config for guest VM\n");
+		return -EINVAL;
+	}
 
-	mm->nr_mem_regions = 1;
-	region->flags = 0;
-	region->phy_base = base;
-	region->vir_base = base;
-	region->free_size = region->size = size;
+	if (alloc_vm_memory(vm)) {
+		pr_err("allocate memory for vm-%d failed\n", vm->vmid);
+		return -ENOMEM;
+	}
 
-	/* allocate memory for this vm */
-	return vm_mmap_init(vm, size);
+	return 0;
 }
 
 int create_guest_vm(struct vmtag *tag)
@@ -235,13 +235,9 @@ int create_guest_vm(struct vmtag *tag)
 	if (!vm)
 		goto unmap_vmtag;
 
-	ret = guest_vm_memory_init(vm, vmtag->mem_base, vmtag->mem_size);
-	if (ret) {
-		pr_err("no more mmap space for vm\n");
+	ret = guest_vmm_area_init(vm, vmtag->mem_base, vmtag->mem_size);
+	if (ret)
 		goto release_vm;
-	}
-
-	vmtag->mmap_base = vm->mm.hvm_mmap_base;
 
 	ret = alloc_vm_memory(vm);
 	if (ret)
@@ -501,7 +497,7 @@ static void *create_native_vm_of(struct device_node *node, void *arg)
 
 	for (i = 0; i < ret; i ++) {
 		split_vmm_area(&vm->mm, meminfo[i * 2], meminfo[i * 2],
-				meminfo[i * 2 + 1], VM_NORMAL);
+				meminfo[i * 2 + 1], VM_NORMAL | VM_PT);
 	}
 
 	return vm;

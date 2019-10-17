@@ -187,6 +187,7 @@ static int fdt_setup_memory(struct vm *vm)
 	
 	size = 0;
 
+#if 0
 	for (i = 0; i < vm->mm.nr_mem_regions; i++) {
 		mstart = vm->mm.memory_regions[i].phy_base;
 		msize = vm->mm.memory_regions[i].size;
@@ -211,6 +212,7 @@ static int fdt_setup_memory(struct vm *vm)
 			size += 2;
 		}
 	}
+#endif
 
 	fdt_setprop(dtb, offset, "reg", (void *)tmp, size * 4);
 	free(args);
